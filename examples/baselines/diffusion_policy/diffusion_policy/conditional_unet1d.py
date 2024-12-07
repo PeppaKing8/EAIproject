@@ -22,7 +22,9 @@ from typing import Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
+from diffusion_policy.resnet import resnet_custom_rgb
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -123,16 +125,17 @@ class ConditionalResidualBlock1D(nn.Module):
         return out
     
 class ImagePreprocessRGB(nn.Module):
-    def __init__(self, output_channels=42):
+    def __init__(self, output_channels=84):
         super().__init__()
         self.output_channels = output_channels
-        self.fc = nn.Linear(128*128*3, output_channels)
+        # self.fc = nn.Linear(128*128*3, output_channels)
+        self.resnet = resnet_custom_rgb()
 
     def forward(self, x):
         assert x.shape[-1] == 2 * 128 * 128 * 3
-        x = x.view(x.shape[0] * 2, -1)
-        x = self.fc(x)
-        x = x.view(x.shape[0] // 2, -1)
+        x = x.view(x.shape[0] * 2, 128, 128, 3).permute(0, 3, 1, 2)
+        x = self.resnet(x)
+        x = x.view(-1, self.output_channels)
         return x
 
 
@@ -252,9 +255,9 @@ class ConditionalUnet1D(nn.Module):
 
         if global_cond is not None:
             if global_cond.shape[-1] == 98304: # rgb image
-                # print("unet/SHAPE:", global_cond.shape) # 1024, 98304
-                global_cond = self.image_preprocess(global_cond) # 1024, 84
-                assert global_cond.shape == (1024, 84), f"global_cond shape: {global_cond.shape}"
+                # print("unet/SHAPE:", global_cond.shape) # batch_size, 98304
+                global_cond = self.image_preprocess(global_cond) # batch_size, 84
+                # assert global_cond.shape == (1024, 84), f"global_cond shape: {global_cond.shape}"
             global_feature = torch.cat([
                 global_feature, global_cond
             ], axis=-1)

@@ -75,9 +75,9 @@ class Args:
     max_episode_steps: Optional[int] = None
     """Change the environments' max_episode_steps to this value. Sometimes necessary if the demonstrations being imitated are too short. Typically the default
     max episode steps of environments in ManiSkill are tuned lower so reinforcement learning agents can learn faster."""
-    log_freq: int = 1000
+    log_freq: int = 100
     """the frequency of logging the training metrics"""
-    eval_freq: int = 5000
+    eval_freq: int = 500
     """the frequency of evaluating the agent on the evaluation environments"""
     save_freq: Optional[int] = None
     """the frequency of saving the model checkpoints. By default this is None and will only save checkpoints based on the best evaluation metrics."""
