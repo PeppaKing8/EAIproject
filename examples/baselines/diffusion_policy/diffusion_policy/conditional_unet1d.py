@@ -121,6 +121,19 @@ class ConditionalResidualBlock1D(nn.Module):
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
         return out
+    
+class ImagePreprocess(nn.Module):
+    def __init__(self, output_channels=42):
+        super().__init__()
+        self.output_channels = output_channels
+        self.fc = nn.Linear(128*128*3, output_channels)
+
+    def forward(self, x):
+        assert x.shape[-1] == 2 * 128 * 128 * 3
+        x = x.view(x.shape[0], x.shape[1] * 2, -1)
+        x = self.fc(x)
+        x = x.view(x.shape[0], x.shape[1], -1)
+        return x
 
 
 class ConditionalUnet1D(nn.Module):
@@ -205,6 +218,8 @@ class ConditionalUnet1D(nn.Module):
         self.up_modules = up_modules
         self.down_modules = down_modules
         self.final_conv = final_conv
+        
+        self.image_preprocess = ImagePreprocess()
 
         n_params = sum(p.numel() for p in self.parameters())
         print(f"number of parameters: {n_params / 1e6:.2f}M")
@@ -236,6 +251,8 @@ class ConditionalUnet1D(nn.Module):
         global_feature = self.diffusion_step_encoder(timesteps)
 
         if global_cond is not None:
+            if global_cond.shape[-1] == 98304: # rgb image
+                global_cond = self.image_preprocess(global_cond)
             global_feature = torch.cat([
                 global_feature, global_cond
             ], axis=-1)
