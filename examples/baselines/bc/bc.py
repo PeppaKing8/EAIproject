@@ -363,5 +363,5 @@ if __name__ == "__main__":
         if args.save_freq is not None and iteration % args.save_freq == 0:
             save_ckpt(run_name, str(iteration))
     envs.close()
-    if args.track:
+    if args.track:    tmux attach-session -t <session_name>
         wandb.finish()

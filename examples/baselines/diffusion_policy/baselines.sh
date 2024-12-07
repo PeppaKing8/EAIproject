@@ -1,6 +1,6 @@
 # Baseline scripts
 
-for demo_type in "motionplanning" "rl"
+for demo_type in "motionplanning" # "rl"
 do
   demo_path=~/.maniskill/demos/PickCube-v1/${demo_type}/trajectory.state.pd_ee_delta_pos.cpu.h5
   if [ -f "$demo_path" ]; then
