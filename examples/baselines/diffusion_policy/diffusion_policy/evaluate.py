@@ -20,7 +20,7 @@ def collect_episode_info(infos, result):
                 result['fail'].append(info['fail'])
     return result
 
-def evaluate(n: int, agent, eval_envs, device, sim_backend: str):
+def evaluate(n: int, agent, eval_envs, device, sim_backend: str, args):
     agent.eval()
     with torch.no_grad():
         eval_metrics = defaultdict(list)
@@ -28,6 +28,7 @@ def evaluate(n: int, agent, eval_envs, device, sim_backend: str):
         eps_count = 0
         while eps_count < n:
             obs = common.to_tensor(obs, device)
+            # print("evaluate:", obs)
             action_seq = agent.get_action(obs)
             if sim_backend == "cpu":
                 action_seq = action_seq.cpu().numpy()

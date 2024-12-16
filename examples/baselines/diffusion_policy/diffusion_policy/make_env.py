@@ -4,7 +4,37 @@ import mani_skill.envs
 from mani_skill.utils import gym_utils
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from mani_skill.utils.wrappers import RecordEpisode, FrameStack, CPUGymWrapper
+from mani_skill.envs.sapien_env import BaseEnv
+from typing import Dict
+import torch
 
+class RGBDWrapper(gym.ObservationWrapper):
+    def __init__(self, env):
+        self.base_env: BaseEnv = env.unwrapped
+        super().__init__(env)
+        new_obs = self.observation(self.base_env._init_raw_obs)
+        self.base_env.update_obs_space(new_obs)
+    
+    def observation(self, observation: Dict):
+        sensor_data = observation.pop("sensor_data")
+        del observation["sensor_param"]
+        images = []
+        for cam_data in sensor_data.values():
+            rgb_img = torch.Tensor(cam_data["rgb"])
+            rgb_img = rgb_img / 255.0
+            depth_img = torch.Tensor(cam_data["depth"])
+            depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())
+            thres = 0.05
+            depth_img = torch.min(thres * torch.ones_like(depth_img), depth_img) / thres
+            # print("rgb:", rgb_img.shape, "depth:", depth_img.shape)
+            images.append(rgb_img)
+            images.append(depth_img)
+
+        images = torch.concat(images, axis=-1)
+        # print("make_env/", images.shape)
+        # images = images.flatten(start_dim=1)
+        # print("make_env/", images.shape)
+        return images
 
 def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, other_kwargs: dict, video_dir: Optional[str] = None, wrappers: list[gym.Wrapper] = []):
     """Create vectorized environment for evaluation and/or recording videos.
@@ -20,6 +50,7 @@ def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, ot
         wrappers: the list of wrappers to apply to the environment.
     """
     if sim_backend == "cpu":
+        # raise NotImplementedError("CPU vectorized environments are not supported for evaluation. NOTE: This error is written by EAI project, not the original code.")
         def cpu_make_env(env_id, seed, video_dir=None, env_kwargs = dict(), other_kwargs = dict()):
             def thunk():
                 env = gym.make(env_id, reconfiguration_freq=1, **env_kwargs)

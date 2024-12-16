@@ -24,7 +24,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from diffusion_policy.resnet import resnet_custom_rgb
+from diffusion_policy.resnet import resnet_custom_rgb, resnet_custom_rgbd
+import os
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -137,10 +138,43 @@ class ImagePreprocessRGB(nn.Module):
         x = self.resnet(x)
         x = x.view(-1, self.output_channels)
         return x
+    
+class ImagePreprocessRGBD(nn.Module):
+    def __init__(self, output_channels=84):
+        super().__init__()
+        self.output_channels = output_channels
+        self.resnet = resnet_custom_rgbd(in_channels=4)
+
+    def forward(self, x):
+        assert x.shape[-1] == 2 * 128 * 128 * 4
+        x = x.view(x.shape[0] * 2, 128, 128, 4).permute(0, 3, 1, 2)
+        rgb = x[:, :3, ...]
+        depth = x[:, 3:, ...]
+        # depth_exp_img = depth[0]
+        thres = 0.05
+        # depth_exp_img = torch.min(thres * torch.ones_like(depth_exp_img), depth_exp_img) / thres
+        depth = torch.min(thres * torch.ones_like(depth), depth) / thres
+        x = torch.cat([rgb, depth], dim=1)
+        # depth_exp_img = 1.0 - (1.0 - depth_exp_img) ** 15
+        # import matplotlib.pyplot as plt
+        # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+        # plt.colorbar()
+        # plt.show()
+        # if not os.path.exists('output_images'):
+        #     os.makedirs('output_images')
+        # plt.savefig('output_images/depth_image.png')
+        # rgb_exp_img = rgb[0].permute(1, 2, 0)
+        # # rgb_exp_img[:,:,2] = rgb_exp_img[:,:,1] = 0.0
+        # plt.imshow(rgb_exp_img.cpu().numpy())
+        # plt.savefig('output_images/rgb_image.png')
+        # assert False
+        out = self.resnet(x)
+        out = out.view(-1, self.output_channels)
+        return out
 
 
 class ConditionalUnet1D(nn.Module):
-    def __init__(self,
+    def __init__(self, args,
         input_dim,
         global_cond_dim,
         diffusion_step_embed_dim=256,
@@ -170,8 +204,10 @@ class ConditionalUnet1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
-        cond_dim = dsed + global_cond_dim
-        # print("cond", cond_dim) # 148
+        # cond_dim = dsed + global_cond_dim # 148 = 64 + 84
+        cond_dim = 148
+        self.cond_dim = cond_dim
+        # print("cond:", cond_dim, "=", dsed, "+", global_cond_dim)
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
         mid_dim = all_dims[-1]
@@ -222,7 +258,16 @@ class ConditionalUnet1D(nn.Module):
         self.down_modules = down_modules
         self.final_conv = final_conv
         
-        self.image_preprocess = ImagePreprocessRGB()
+        if args.method == 'rgb':
+            self.image_preprocess = ImagePreprocessRGB()
+            self.method = 'rgb'
+        elif args.method == 'rgbd':
+            self.image_preprocess = ImagePreprocessRGBD()
+            self.method = 'rgbd'
+        elif args.method == 'state':
+            self.method = 'state'
+        else:
+            raise ValueError(f"Invalid method: {args.method}")
 
         n_params = sum(p.numel() for p in self.parameters())
         print(f"number of parameters: {n_params / 1e6:.2f}M")
@@ -254,13 +299,20 @@ class ConditionalUnet1D(nn.Module):
         global_feature = self.diffusion_step_encoder(timesteps)
 
         if global_cond is not None:
-            if global_cond.shape[-1] == 98304: # rgb image
-                # print("unet/SHAPE:", global_cond.shape) # batch_size, 98304
-                global_cond = self.image_preprocess(global_cond) # batch_size, 84
-                # assert global_cond.shape == (1024, 84), f"global_cond shape: {global_cond.shape}"
+            if self.method == 'rgb':
+                assert global_cond.shape[-1] == 98304, f"global_cond shape: {global_cond.shape}"
+                global_cond = self.image_preprocess(global_cond)
+            elif self.method == 'rgbd':
+                assert global_cond.shape[-1] == 131072, f"global_cond shape: {global_cond.shape}"
+                if isinstance(global_cond, torch.cuda.ShortTensor):
+                    global_cond = global_cond.to(torch.float32)
+                global_cond = self.image_preprocess(global_cond)
+            
+            assert global_cond.shape[0] == global_feature.shape[0], f"global_cond shape: {global_cond.shape}, global_feature shape: {global_feature.shape}"
             global_feature = torch.cat([
                 global_feature, global_cond
             ], axis=-1)
+            assert global_feature.shape[-1] == self.cond_dim, f"global_feature shape: {global_feature.shape}; cond_dim: {self.cond_dim}"
 
         x = sample
         h = []

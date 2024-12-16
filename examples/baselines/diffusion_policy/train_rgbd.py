@@ -22,7 +22,7 @@ from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 from torch.utils.data.dataloader import DataLoader
 from diffusion_policy.utils import IterationBasedBatchSampler, worker_init_fn
-from diffusion_policy.make_env import make_eval_envs
+from diffusion_policy.make_env import make_eval_envs, RGBDWrapper
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
@@ -30,6 +30,8 @@ from diffusion_policy.conditional_unet1d import ConditionalUnet1D
 from dataclasses import dataclass, field
 from typing import Optional, List
 import tyro
+from torchvision.transforms import RandomCrop, Pad
+from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper
 
 @dataclass
 class Args:
@@ -58,7 +60,7 @@ class Args:
     """number of trajectories to load from the demo dataset"""
     total_iters: int = 1_000_000
     """total timesteps of the experiment"""
-    batch_size: int = 1024
+    batch_size: int = 128
     """the batch size of sample from the replay memory"""
 
     # Diffusion Policy specific arguments
@@ -77,7 +79,7 @@ class Args:
     max episode steps of environments in ManiSkill are tuned lower so reinforcement learning agents can learn faster."""
     log_freq: int = 100
     """the frequency of logging the training metrics"""
-    eval_freq: int = 500
+    eval_freq: int = 1000
     """the frequency of evaluating the agent on the evaluation environments"""
     save_freq: Optional[int] = None
     """the frequency of saving the model checkpoints. By default this is None and will only save checkpoints based on the best evaluation metrics."""
@@ -94,7 +96,9 @@ class Args:
 
     # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
     demo_type: Optional[str] = None
-    method: str = 'state'
+    
+    data_aug: bool = False
+    method: str = 'rgbd'
 
 
 class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memory
@@ -104,20 +108,27 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
         else:
             from diffusion_policy.utils import load_demo_dataset
             trajectories = load_demo_dataset(data_path, num_traj=num_traj, concat=False)
-            # trajectories['observations'] is a list of np.ndarray (L+1, obs_dim)
-            # trajectories['actions'] is a list of np.ndarray (L, act_dim)
+
+        if args.data_aug:
+            self.random_crop = RandomCrop((100, 100))  # Define the random crop size
+            self.pad = Pad((14, 14))  # Pad to maintain the original size of 128x128
 
         for k, v in trajectories.items():
             for i in range(len(v)):
-                trajectories[k][i] = torch.Tensor(v[i]).to(device)
+                if isinstance(v[i], dict):
+                    if "sensor_data" in v[i]:
+                        img = torch.Tensor(v[i]["sensor_data"]["base_camera"]["rgb"]).to(device) # input rgb image
+                        depth_img = torch.Tensor(v[i]["sensor_data"]["base_camera"]["depth"]).to(device) # input depth image, (75, 128, 128, 1)
+                        img = img / 255.0  # Normalize RGB image to [0, 1]
+                        depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())  # Normalize depth image to [0, 1]
+                        trajectories[k][i] = torch.cat((img, depth_img), dim=-1)
+                    else:
+                        assert False, f"Unknown dict: {v[i].keys()}"
+                else:
+                    trajectories[k][i] = torch.Tensor(v[i]).to(device) # actions
 
-        # Pre-compute all possible (traj_idx, start, end) tuples, this is very specific to Diffusion Policy
         if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel':
             self.pad_action_arm = torch.zeros((trajectories['actions'][0].shape[1]-1,), device=device)
-            # to make the arm stay still, we pad the action with 0 in 'delta_pos' control mode
-            # gripper action needs to be copied from the last action
-        # else:
-        #     raise NotImplementedError(f'Control Mode {args.control_mode} not supported')
         self.obs_horizon, self.pred_horizon = obs_horizon, pred_horizon = args.obs_horizon, args.pred_horizon
         self.slices = []
         num_traj = len(trajectories['actions'])
@@ -127,18 +138,11 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
             assert trajectories['observations'][traj_idx].shape[0] == L + 1
             total_transitions += L
 
-            # |o|o|                             observations: 2
-            # | |a|a|a|a|a|a|a|a|               actions executed: 8
-            # |p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted: 16
             pad_before = obs_horizon - 1
-            # Pad before the trajectory, so the first action of an episode is in "actions executed"
-            # obs_horizon - 1 is the number of "not used actions"
             pad_after = pred_horizon - obs_horizon
-            # Pad after the trajectory, so all the observations are utilized in training
-            # Note that in the original code, pad_after = act_horizon - 1, but I think this is not the best choice
             self.slices += [
                 (traj_idx, start, start + pred_horizon) for start in range(-pad_before, L - pred_horizon + pad_after)
-            ]  # slice indices follow convention [start, end)
+            ]
 
         print(f"Total transitions: {total_transitions}, Total obs sequences: {len(self.slices)}")
 
@@ -149,16 +153,22 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
         L, act_dim = self.trajectories['actions'][traj_idx].shape
 
         obs_seq = self.trajectories['observations'][traj_idx][max(0, start):start+self.obs_horizon]
-        # start+self.obs_horizon is at least 1
         act_seq = self.trajectories['actions'][traj_idx][max(0, start):end]
         if start < 0: # pad before the trajectory
-            obs_seq = torch.cat([obs_seq[0].repeat(-start, 1), obs_seq], dim=0)
+            obs_seq = torch.cat([obs_seq[0].repeat(-start, 1, 1, 1), obs_seq], dim=0)
             act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
         if end > L: # pad after the trajectory
             gripper_action = act_seq[-1, -1]
             pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
             act_seq = torch.cat([act_seq, pad_action.repeat(end-L, 1)], dim=0)
-            # making the robot (arm and gripper) stay still
+
+        if args.data_aug:
+            # Apply random crop and padding here
+            obs_seq = obs_seq.permute(0, 3, 1, 2)  # (75, 128, 128, 3) -> (75, 3, 128, 128)
+            obs_seq = self.random_crop(obs_seq)  # Apply random crop
+            obs_seq = self.pad(obs_seq)  # Apply padding
+            obs_seq = obs_seq.permute(0, 2, 3, 1)  # (75, 3, 128, 128) -> (75, 128, 128, 3)
+
         assert obs_seq.shape[0] == self.obs_horizon and act_seq.shape[0] == self.pred_horizon
         return {
             'observations': obs_seq,
@@ -175,16 +185,15 @@ class Agent(nn.Module):
         self.obs_horizon = args.obs_horizon
         self.act_horizon = args.act_horizon
         self.pred_horizon = args.pred_horizon
-        assert len(env.single_observation_space.shape) == 2 # (obs_horizon, obs_dim)
-        assert len(env.single_action_space.shape) == 1 # (act_dim, )
-        assert (env.single_action_space.high == 1).all() and (env.single_action_space.low == -1).all()
-        # denoising results will be clipped to [-1,1], so the action should be in [-1,1] as well
+        # assert len(env.single_observation_space.shape) == 2, f" observation space shape: {env.single_observation_space.shape}" # (obs_horizon, obs_dim)
+        # assert len(env.single_action_space.shape) == 1 # (act_dim, )
+        # assert (env.single_action_space.high == 1).all() and (env.single_action_space.low == -1).all()
         self.act_dim = env.single_action_space.shape[0]
 
         self.noise_pred_net = ConditionalUnet1D(
             args,
-            input_dim=self.act_dim, # act_horizon is not used (U-Net doesn't care)
-            global_cond_dim=np.prod(env.single_observation_space.shape), # obs_horizon * obs_dim
+            input_dim=self.act_dim,
+            global_cond_dim=np.prod(env.single_observation_space.shape),
             diffusion_step_embed_dim=args.diffusion_step_embed_dim,
             down_dims=args.unet_dims,
             n_groups=args.n_groups,
@@ -192,71 +201,56 @@ class Agent(nn.Module):
         self.num_diffusion_iters = 100
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
-            beta_schedule='squaredcos_cap_v2', # has big impact on performance, try not to change
-            clip_sample=True, # clip output to [-1,1] to improve stability
-            prediction_type='epsilon' # predict noise (instead of denoised action)
+            beta_schedule='squaredcos_cap_v2',
+            clip_sample=True,
+            prediction_type='epsilon'
         )
 
     def compute_loss(self, obs_seq, action_seq):
         B = obs_seq.shape[0]
+        
+        # print("obs_seq:", obs_seq)
 
-        # observation as FiLM conditioning
-        obs_cond = obs_seq.flatten(start_dim=1) # (B, obs_horizon * obs_dim)
+        obs_cond = obs_seq.flatten(start_dim=1)
 
-        # sample noise to add to actions
         noise = torch.randn((B, self.pred_horizon, self.act_dim), device=device)
 
-        # sample a diffusion iteration for each data point
         timesteps = torch.randint(
             0, self.noise_scheduler.config.num_train_timesteps,
             (B,), device=device
         ).long()
 
-        # add noise to the clean images(actions) according to the noise magnitude at each diffusion iteration
-        # (this is the forward diffusion process)
         noisy_action_seq = self.noise_scheduler.add_noise(
             action_seq, noise, timesteps)
 
-        # predict the noise residual
         noise_pred = self.noise_pred_net(
             noisy_action_seq, timesteps, global_cond=obs_cond)
 
         return F.mse_loss(noise_pred, noise)
 
     def get_action(self, obs_seq):
-        # init scheduler
-        # self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
-        # set_timesteps will change noise_scheduler.timesteps is only used in noise_scheduler.step()
-        # noise_scheduler.step() is only called during inference
-        # if we use DDPM, and inference_diffusion_steps == train_diffusion_steps, then we can skip this
-
-        # obs_seq: (B, obs_horizon, obs_dim)
         B = obs_seq.shape[0]
         with torch.no_grad():
-            obs_cond = obs_seq.flatten(start_dim=1) # (B, obs_horizon * obs_dim)
+            obs_cond = obs_seq.flatten(start_dim=1)
 
-            # initialize action from Guassian noise
             noisy_action_seq = torch.randn((B, self.pred_horizon, self.act_dim), device=obs_seq.device)
 
             for k in self.noise_scheduler.timesteps:
-                # predict noise
                 noise_pred = self.noise_pred_net(
                     sample=noisy_action_seq,
                     timestep=k,
                     global_cond=obs_cond,
                 )
 
-                # inverse diffusion step (remove noise)
                 noisy_action_seq = self.noise_scheduler.step(
                     model_output=noise_pred,
                     timestep=k,
                     sample=noisy_action_seq,
                 ).prev_sample
 
-        # only take act_horizon number of actions
         start = self.obs_horizon - 1
         end = start + self.act_horizon
-        return noisy_action_seq[:, start:end] # (B, act_horizon, act_dim)
+        return noisy_action_seq[:, start:end]
 
 def save_ckpt(run_name, tag):
     os.makedirs(f'runs/{run_name}/checkpoints', exist_ok=True)
@@ -289,7 +283,6 @@ if __name__ == "__main__":
     assert args.obs_horizon + args.act_horizon - 1 <= args.pred_horizon
     assert args.obs_horizon >= 1 and args.act_horizon >= 1 and args.pred_horizon >= 1
 
-    # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -297,12 +290,12 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
-    env_kwargs = dict(control_mode=args.control_mode, reward_mode="sparse", obs_mode="state", render_mode="rgb_array")
+    # env_kwargs = dict(control_mode=args.control_mode, reward_mode="sparse", obs_mode="state", render_mode="rgb_array")
+    env_kwargs = dict(control_mode=args.control_mode, reward_mode="sparse", obs_mode="rgb+depth", render_mode="rgb_array")
     if args.max_episode_steps is not None:
         env_kwargs["max_episode_steps"] = args.max_episode_steps
     other_kwargs = dict(obs_horizon=args.obs_horizon)
-    envs = make_eval_envs(args.env_id, args.num_eval_envs, args.sim_backend, env_kwargs, other_kwargs, video_dir=f'runs/{run_name}/videos' if args.capture_video else None)
+    envs = make_eval_envs(args.env_id, args.num_eval_envs, args.sim_backend, env_kwargs, other_kwargs, video_dir=f'runs/{run_name}/videos' if args.capture_video else None, wrappers=[RGBDWrapper])
 
     if args.track:
         import wandb
@@ -324,7 +317,6 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # dataloader setup
     dataset = SmallDemoDataset_DiffusionPolicy(args.demo_path, device, num_traj=args.num_demos)
     sampler = RandomSampler(dataset, replacement=False)
     batch_sampler = BatchSampler(sampler, batch_size=args.batch_size, drop_last=True)
@@ -338,12 +330,10 @@ if __name__ == "__main__":
     if args.num_demos is None:
         args.num_demos = len(dataset)
 
-    # agent setup
     agent = Agent(envs, args).to(device)
     optimizer = optim.AdamW(params=agent.parameters(),
         lr=args.lr, betas=(0.95, 0.999), weight_decay=1e-6)
 
-    # Cosine LR schedule with linear warmup
     lr_scheduler = get_scheduler(
         name='cosine',
         optimizer=optimizer,
@@ -351,52 +341,38 @@ if __name__ == "__main__":
         num_training_steps=args.total_iters,
     )
 
-    # Exponential Moving Average
-    # accelerates training and improves stability
-    # holds a copy of the model weights
     ema = EMAModel(parameters=agent.parameters(), power=0.75)
     ema_agent = Agent(envs, args).to(device)
 
-    # ---------------------------------------------------------------------------- #
-    # Training begins.
-    # ---------------------------------------------------------------------------- #
     agent.train()
 
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
 
     for iteration, data_batch in enumerate(train_dataloader):
-        # # copy data from cpu to gpu
-        # data_batch = {k: v.cuda(non_blocking=True) for k, v in data_batch.items()}
 
-        # forward and compute loss
         total_loss = agent.compute_loss(
-            obs_seq=data_batch['observations'], # (B, L, obs_dim)
-            action_seq=data_batch['actions'], # (B, L, act_dim)
+            obs_seq=data_batch['observations'],
+            action_seq=data_batch['actions'],
         )
 
-        # backward
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
-        lr_scheduler.step() # step lr scheduler every batch, this is different from standard pytorch behavior
+        lr_scheduler.step()
         last_tick = time.time()
 
-        # update Exponential Moving Average of the model weights
         ema.step(agent.parameters())
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
         if iteration % args.log_freq == 0:
             print(f"Iteration {iteration}, loss: {total_loss.item()}")
             writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], iteration)
             writer.add_scalar("losses/total_loss", total_loss.item(), iteration)
             for k, v in timings.items():
                 writer.add_scalar(f"time/{k}", v, iteration)
-        # Evaluation
         if iteration % args.eval_freq == 0:
             last_tick = time.time()
 
             ema.copy_to(ema_agent.parameters())
-            # def sample_fn(obs):
 
             eval_metrics = evaluate(args.num_eval_episodes, ema_agent, envs, device, args.sim_backend, args)
             timings["eval"] += time.time() - last_tick
@@ -413,8 +389,9 @@ if __name__ == "__main__":
                     best_eval_metrics[k] = eval_metrics[k]
                     save_ckpt(run_name, f"best_eval_{k}")
                     print(f'New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint.')
-        # Checkpoint
         if args.save_freq is not None and iteration % args.save_freq == 0:
             save_ckpt(run_name, str(iteration))
+
+    print("Training completed.")
     envs.close()
     writer.close()
