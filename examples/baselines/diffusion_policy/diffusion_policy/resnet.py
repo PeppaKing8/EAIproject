@@ -99,10 +99,10 @@ class ResidualBlockSmall(nn.Module):
         return out
 
 class SmallResNet(nn.Module):
-    def __init__(self, block, layers, num_classes=84):
+    def __init__(self, block, layers, in_channels=3, num_classes=84):
         super(SmallResNet, self).__init__()
         self.in_channels = 32
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
         self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -207,7 +207,7 @@ class TinyResNet(nn.Module):
         return x
 
 def resnet_custom_rgb():
-    return ResNet(ResidualBlock, [3, 4, 6, 3], num_classes=42)
+    return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], num_classes=42)
 
 def resnet_custom_rgbd(in_channels=4):
-    return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], in_channels=4, num_classes=42)
+    return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], in_channels=in_channels, num_classes=42)

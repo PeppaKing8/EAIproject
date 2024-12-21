@@ -20,6 +20,7 @@ from mani_skill.utils import gym_utils
 from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+from mani_skill.envs.tasks.humanoid.humanoid_drawer import UnitreeG1OpenDrawerEnv
 
 @dataclass
 class Args:
@@ -63,7 +64,7 @@ class Args:
     """whether to let parallel evaluation environments reset upon termination instead of truncation"""
     num_steps: int = 50
     """the number of steps to run in each environment per policy rollout"""
-    num_eval_steps: int = 50
+    num_eval_steps: int = 500
     """the number of steps to run in each evaluation environment during evaluation"""
     reconfiguration_freq: Optional[int] = None
     """how often to reconfigure the environment during training"""
@@ -196,6 +197,7 @@ if __name__ == "__main__":
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+    print(envs)
     eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, **env_kwargs)
     if isinstance(envs.action_space, gym.spaces.Dict):
         envs = FlattenActionSpaceWrapper(envs)
