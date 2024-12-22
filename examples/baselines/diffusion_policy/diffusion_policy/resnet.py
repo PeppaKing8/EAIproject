@@ -205,9 +205,30 @@ class TinyResNet(nn.Module):
         x = torch.flatten(x, 1)
         x = self.fc(x)
         return x
+    
+class CNN(nn.Module):
+    def __init__(self, in_channels=3, num_classes=42):
+        super(CNN, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.conv4 = nn.Conv2d(32, 4, kernel_size=3, stride=1, padding=1)
+        self.fc = nn.Linear(4 * 128 * 128, num_classes)
+        self.relu = nn.LeakyReLU(0.1)
+    
+    def forward(self, x):
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.relu(self.conv3(x))
+        x = self.relu(self.conv4(x))
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
 
-def resnet_custom_rgb():
-    return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], num_classes=42)
+def resnet_custom_rgb(in_channels=3):
+    # return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], num_classes=42)
+    return CNN(in_channels=in_channels, num_classes=42)
 
 def resnet_custom_rgbd(in_channels=4):
-    return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], in_channels=in_channels, num_classes=42)
+    # return TinyResNet(ResidualBlockTiny, [1, 1, 1, 1], in_channels=in_channels, num_classes=42)
+    return CNN(in_channels=in_channels, num_classes=42)

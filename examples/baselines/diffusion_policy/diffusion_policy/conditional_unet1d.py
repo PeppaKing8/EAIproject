@@ -143,64 +143,81 @@ class ImagePreprocessRGBD(nn.Module):
     def __init__(self, output_channels=84):
         super().__init__()
         self.output_channels = output_channels
-        # self.resnet = resnet_custom_rgbd(in_channels=4)
-        self.resnet_rgb = resnet_custom_rgb()
-        self.split: int = 8
-        self.thres_l = 0.01
-        self.thres_r = 0.05
-        self.resnet_depth = []
-        self.threses = []
-        
-        length = (self.thres_r - self.thres_l) / self.split
-        for i in range(self.split):
-            self.resnet_depth.append(resnet_custom_rgbd(in_channels=1).to('cuda:0'))
-            self.threses.append((self.thres_l + length * i, self.thres_l + length * (i + 1)))
-        
-        # self.resnet_depth = resnet_custom_rgbd(in_channels=1)
-        self.fc = nn.Linear(output_channels * (self.split + 1), output_channels)
+        ###################
+        self.split_depth = False # choose the model type here
+        ###################
+        if self.split_depth:
+            self.resnet_rgb = resnet_custom_rgb()
+            self.split: int = 8
+            self.thres_l = 0.01
+            self.thres_r = 0.05
+            self.resnet_depth = []
+            self.threses = []
+            
+            length = (self.thres_r - self.thres_l) / self.split
+            for i in range(self.split):
+                self.resnet_depth.append(resnet_custom_rgbd(in_channels=1).to('cuda:0'))
+                self.threses.append((self.thres_l + length * i, self.thres_l + length * (i + 1)))
+            
+            # self.resnet_depth = resnet_custom_rgbd(in_channels=1)
+            self.fc = nn.Linear(output_channels * (self.split + 1), output_channels)
+        else:
+            self.resnet_rgb = resnet_custom_rgb()
+            self.resnet_depth = resnet_custom_rgbd(in_channels=1)
+            self.fc = nn.Linear(output_channels * 2, output_channels)
 
     def forward(self, x):
         assert x.shape[-1] == 2 * 128 * 128 * 4
-        x = x.view(x.shape[0] * 2, 128, 128, 4).permute(0, 3, 1, 2)
-        rgb = x[:, :3, ...]
-        depth = x[:, 3:, ...]
-        
-        out = self.resnet_rgb(rgb)
-        out = out.view(-1, self.output_channels)
-        
-        # depth_discrete = torch.zeros_like(depth)
-        for i in range(self.split):
-            mask = (depth > self.threses[i][0]) & (depth <= self.threses[i][1])
-            depth_map = depth * mask
-            depth_map = (depth_map - self.threses[i][0]) / (self.threses[i][1] - self.threses[i][0])
-            # depth_map = mask.to(torch.float32)
-            depth_map = depth_map.to('cuda:0')
-            depth_map.requires_grad = True
-            out_depth = self.resnet_depth[i](depth_map)
-            out_depth = out_depth.view(-1, self.output_channels)
-            out = torch.cat([out, out_depth], dim=-1)
-                
-        # depth.requires_grad = True
-        # depth_exp_img = depth[0][0]
-        # import matplotlib.pyplot as plt
-        # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
-        # plt.colorbar()
-        # plt.show()
-        # if not os.path.exists('output_images'):
-        #     os.makedirs('output_images')
-        # plt.savefig('output_images/depth_image.png')
-        # rgb_exp_img = rgb[0].permute(1, 2, 0)
-        # # # rgb_exp_img[:,:,2] = rgb_exp_img[:,:,1] = 0.0
-        # plt.imshow(rgb_exp_img.cpu().numpy())
-        # plt.savefig('output_images/rgb_image.png')
-        # assert False
-        
-        # out_depth = self.resnet_depth(depth)
-        # out_depth = out_depth.view(-1, self.output_channels)
-        # out = torch.cat([out, out_depth], dim=-1)
-        
-        out = self.fc(out)
-        return out
+        x = x.view(x.shape[0] * 2, 128, 128, 4).permute(0, 3, 1, 2) # (B, 4, 128, 128)
+        if self.split_depth:
+            rgb = x[:, :3, ...]
+            depth = x[:, 3:, ...]
+            
+            out = self.resnet_rgb(rgb)
+            out = out.view(-1, self.output_channels)
+            
+            # depth_discrete = torch.zeros_like(depth)
+            for i in range(self.split):
+                mask = (depth > self.threses[i][0]) & (depth <= self.threses[i][1])
+                depth_map = depth * mask
+                depth_map = (depth_map - self.threses[i][0]) / (self.threses[i][1] - self.threses[i][0])
+                # depth_map = mask.to(torch.float32)
+                depth_map = depth_map.to('cuda:0')
+                depth_map.requires_grad = True
+                out_depth = self.resnet_depth[i](depth_map)
+                out_depth = out_depth.view(-1, self.output_channels)
+                out = torch.cat([out, out_depth], dim=-1)
+                    
+            # depth.requires_grad = True
+            # depth_exp_img = depth[0][0]
+            # import matplotlib.pyplot as plt
+            # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+            # plt.colorbar()
+            # plt.show()
+            # if not os.path.exists('output_images'):
+            #     os.makedirs('output_images')
+            # plt.savefig('output_images/depth_image.png')
+            # rgb_exp_img = rgb[0].permute(1, 2, 0)
+            # # # rgb_exp_img[:,:,2] = rgb_exp_img[:,:,1] = 0.0
+            # plt.imshow(rgb_exp_img.cpu().numpy())
+            # plt.savefig('output_images/rgb_image.png')
+            # assert False
+            
+            # out_depth = self.resnet_depth(depth)
+            # out_depth = out_depth.view(-1, self.output_channels)
+            # out = torch.cat([out, out_depth], dim=-1)
+            
+            out = self.fc(out)
+            return out
+        else:
+            rgb = x[:, :3, ...]
+            depth = x[:, 3:, ...]
+            out_rgb = self.resnet_rgb(rgb)
+            out_depth = self.resnet_depth(depth)
+            out = torch.cat([out_rgb, out_depth], dim=-1)
+            out = out.view(-1, self.output_channels)
+            out = self.fc(out)
+            return out
 
 
 class ConditionalUnet1D(nn.Module):

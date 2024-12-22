@@ -252,6 +252,12 @@ class Agent(nn.Module):
         end = start + self.act_horizon
         return noisy_action_seq[:, start:end]
 
+def print_param_diff(agent, prev_params):
+    for name, param in agent.noise_pred_net.image_preprocess.named_parameters():
+        if param.requires_grad:
+            diff = torch.norm(param - prev_params[name])
+            print(f"{name} diff: {diff.item()}")
+
 def save_ckpt(run_name, tag):
     os.makedirs(f'runs/{run_name}/checkpoints', exist_ok=True)
     ema.copy_to(ema_agent.parameters())
@@ -349,6 +355,8 @@ if __name__ == "__main__":
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
 
+    # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
+
     for iteration, data_batch in enumerate(train_dataloader):
 
         total_loss = agent.compute_loss(
@@ -360,6 +368,10 @@ if __name__ == "__main__":
         total_loss.backward()
         optimizer.step()
         lr_scheduler.step()
+        # # Print parameter differences
+        # print_param_diff(agent, prev_params)
+        # # Update previous parameters
+        # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
         last_tick = time.time()
 
         ema.step(agent.parameters())
