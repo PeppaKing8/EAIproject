@@ -396,7 +396,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         reaching_apple_award = torch.linalg.norm(
             self.agent.left_tcp.pose.p - self.apple.pose.p, axis=1
         )
-        reaching_apple_award = 1 - torch.tanh(reaching_apple_award)
+        reaching_apple_award = 1 - torch.tanh(5 * reaching_apple_award)
         
         # apple_to_bowl_dist = torch.linalg.norm(
         #     self.apple.pose.p - self.bowl.pose.p, axis=1
@@ -407,7 +407,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         apple_to_drawer_dist = torch.linalg.norm(
             self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1
         )
-        placing_reward = 1 - torch.tanh(apple_to_drawer_dist)
+        placing_reward = 1 - torch.tanh(5 * apple_to_drawer_dist)
         
         reward += (reaching_apple_award * 30 + placing_reward * 60) * info["success_open"]
         # reward += placing_reward * info["success_open"]
