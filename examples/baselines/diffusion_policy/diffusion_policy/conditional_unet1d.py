@@ -214,8 +214,10 @@ class ImagePreprocessRGBD(nn.Module):
             depth = x[:, 3:, ...]
             out_rgb = self.resnet_rgb(rgb)
             out_depth = self.resnet_depth(depth)
+            # print("image/", out_rgb.shape, out_depth.shape, self.output_channels)
+            out_rgb = out_rgb.view(-1, self.output_channels)
+            out_depth = out_depth.view(-1, self.output_channels)
             out = torch.cat([out_rgb, out_depth], dim=-1)
-            out = out.view(-1, self.output_channels)
             out = self.fc(out)
             return out
 

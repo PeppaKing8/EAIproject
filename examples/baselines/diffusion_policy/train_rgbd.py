@@ -355,7 +355,7 @@ if __name__ == "__main__":
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
 
-    # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
+    prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
 
     for iteration, data_batch in enumerate(train_dataloader):
 
@@ -368,10 +368,10 @@ if __name__ == "__main__":
         total_loss.backward()
         optimizer.step()
         lr_scheduler.step()
-        # # Print parameter differences
-        # print_param_diff(agent, prev_params)
-        # # Update previous parameters
-        # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
+        # Print parameter differences
+        print_param_diff(agent, prev_params)
+        # Update previous parameters
+        prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
         last_tick = time.time()
 
         ema.step(agent.parameters())
