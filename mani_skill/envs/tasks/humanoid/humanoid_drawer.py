@@ -131,21 +131,21 @@ class OpenCabinetDrawerEnv(BaseEnv):
         
     def _load_objects(self, options: dict):
         scale = 0.75
-        builder = self.scene.create_actor_builder()
+        # builder = self.scene.create_actor_builder()
         fix_rotation_pose = sapien.Pose(q=euler2quat(np.pi / 2, 0, 0))
-        model_dir = os.path.dirname(__file__) + "/assets"
-        builder.add_nonconvex_collision_from_file(
-            filename=os.path.join(model_dir, "frl_apartment_bowl_07.ply"),
-            pose=fix_rotation_pose,
-            scale=[scale] * 3,
-        )
-        builder.add_visual_from_file(
-            filename=os.path.join(model_dir, "frl_apartment_bowl_07.glb"),
-            scale=[scale] * 3,
-            pose=fix_rotation_pose,
-        )
-        builder.initial_pose = sapien.Pose(p=[-0.2, 0, 0.953])
-        self.bowl = builder.build_kinematic(name="bowl")
+        # model_dir = os.path.dirname(__file__) + "/assets"
+        # builder.add_nonconvex_collision_from_file(
+        #     filename=os.path.join(model_dir, "frl_apartment_bowl_07.ply"),
+        #     pose=fix_rotation_pose,
+        #     scale=[scale] * 3,
+        # )
+        # builder.add_visual_from_file(
+        #     filename=os.path.join(model_dir, "frl_apartment_bowl_07.glb"),
+        #     scale=[scale] * 3,
+        #     pose=fix_rotation_pose,
+        # )
+        # builder.initial_pose = sapien.Pose(p=[-0.2, 0, 0.953])
+        # self.bowl = builder.build_kinematic(name="bowl")
         
         builder = self.scene.create_actor_builder()
         model_dir = os.path.dirname(__file__) + "/assets"
@@ -167,8 +167,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         # we sample random cabinet model_ids with numpy as numpy is always deterministic based on seed, regardless of
         # GPU/CPU simulation backends. This is useful for replaying demonstrations.
         model_ids = self._batched_episode_rng.choice(self.all_model_ids)
-        # link_ids = self._batched_episode_rng.randint(0, 2**31)
-        link_ids = self._batched_episode_rng.randint(1, 2)
+        link_ids = self._batched_episode_rng.randint(0, 2**31)
 
         self._cabinets = []
         handle_links: List[List[Link]] = []
@@ -240,24 +239,24 @@ class OpenCabinetDrawerEnv(BaseEnv):
             initial_pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
         )
         
-        self.left_tcp = actors.build_sphere(
-            self.scene,
-            radius=0.02,
-            color=[1, 0, 0, 1],
-            name="left_tcp",
-            body_type="kinematic",
-            add_collision=False,
-            initial_pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
-        )
-        self.right_tcp = actors.build_sphere(
-            self.scene,
-            radius=0.02,
-            color=[0, 0, 1, 1],
-            name="right_tcp",
-            body_type="kinematic",
-            add_collision=False,
-            initial_pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
-        )
+        # self.left_tcp = actors.build_sphere(
+        #     self.scene,
+        #     radius=0.02,
+        #     color=[1, 0, 0, 1],
+        #     name="left_tcp",
+        #     body_type="kinematic",
+        #     add_collision=False,
+        #     initial_pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
+        # )
+        # self.right_tcp = actors.build_sphere(
+        #     self.scene,
+        #     radius=0.02,
+        #     color=[0, 0, 1, 1],
+        #     name="right_tcp",
+        #     body_type="kinematic",
+        #     add_collision=False,
+        #     initial_pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
+        # )
 
     def _after_reconfigure(self, options):
         # To spawn cabinets in the right place, we need to change their z position such that
@@ -316,8 +315,8 @@ class OpenCabinetDrawerEnv(BaseEnv):
             self.handle_link_goal.set_pose(
                 Pose.create_from_pq(p=self.handle_link_positions(env_idx))
             )
-            self.left_tcp.set_pose(self.agent.left_tcp.pose)
-            self.right_tcp.set_pose(self.agent.right_tcp.pose)
+            # self.left_tcp.set_pose(self.agent.left_tcp.pose)
+            # self.right_tcp.set_pose(self.agent.right_tcp.pose)
 
     def _after_control_step(self):
         # after each control step, we update the goal position of the handle link
@@ -329,8 +328,8 @@ class OpenCabinetDrawerEnv(BaseEnv):
         self.handle_link_goal.set_pose(
             Pose.create_from_pq(p=self.handle_link_positions())
         )
-        self.left_tcp.set_pose(self.agent.left_tcp.pose)
-        self.right_tcp.set_pose(self.agent.right_tcp.pose)
+        # self.left_tcp.set_pose(self.agent.left_tcp.pose)
+        # self.right_tcp.set_pose(self.agent.right_tcp.pose)
         if self.gpu_sim_enabled:
             self.scene._gpu_apply_all()
 
@@ -344,7 +343,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         link_is_static = (
             torch.linalg.norm(self.handle_link.angular_velocity, axis=1) <= 1
         ) & (torch.linalg.norm(self.handle_link.linear_velocity, axis=1) <= 0.1)
-        place_apple = (torch.linalg.norm(self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1) <= 0.2)
+        place_apple = (torch.linalg.norm(self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1) <= 0.1)
         
         apple_pos = self.apple.pose.p
 
@@ -369,7 +368,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
                 target_handle_pos=info["handle_link_pos"],
                 apple_pos=info["apple_pos"],
                 tcp_to_apple_pos=info["apple_pos"] - self.agent.left_tcp.pose.p,
-                apple_to_bowl_pos=self.apple.pose.p - self.bowl.pose.p,
+                # apple_to_bowl_pos=self.apple.pose.p - self.bowl.pose.p,
                 apple_to_drawer_pos=self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)),
             )
         return obs
@@ -378,7 +377,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         tcp_to_handle_dist = torch.linalg.norm(
             self.agent.right_tcp.pose.p - info["handle_link_pos"], axis=1
         )
-        reaching_reward = 1 - torch.tanh(tcp_to_handle_dist)
+        reaching_reward = 1 - torch.tanh(5 * tcp_to_handle_dist)
         amount_to_open_left = torch.div(
             self.target_qpos - self.handle_link.joint.qpos, self.target_qpos
         )
@@ -399,10 +398,10 @@ class OpenCabinetDrawerEnv(BaseEnv):
         )
         reaching_apple_award = 1 - torch.tanh(reaching_apple_award)
         
-        apple_to_bowl_dist = torch.linalg.norm(
-            self.apple.pose.p - self.bowl.pose.p, axis=1
-        )
-        moving_away_reward = torch.tanh(5 * apple_to_bowl_dist)
+        # apple_to_bowl_dist = torch.linalg.norm(
+        #     self.apple.pose.p - self.bowl.pose.p, axis=1
+        # )
+        # moving_away_reward = torch.tanh(5 * apple_to_bowl_dist)
         
         # Reward for placing the apple into the drawer
         apple_to_drawer_dist = torch.linalg.norm(
@@ -410,9 +409,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         )
         placing_reward = 1 - torch.tanh(apple_to_drawer_dist)
         
-        apple_reward = reaching_apple_award * 5.0 + placing_reward * 20.0
-        reward += apple_reward * info["success_open"]
-        # reward += moving_away_reward + reaching_apple_award * 5
+        reward += (reaching_apple_award * 30 + placing_reward * 60) * info["success_open"]
         # reward += placing_reward * info["success_open"]
         # print(reaching_reward, open_reward, moving_away_reward, placing_reward, reward, info["success_open"])
         return reward
