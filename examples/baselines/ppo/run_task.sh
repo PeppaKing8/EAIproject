@@ -1,4 +1,4 @@
-python ppo_eval.py --env_id="HumanoidOpenDrawer-v1" \
+python ppo.py --env_id="HumanoidOpenDrawer-v1" \
   --num_envs=256 --update_epochs=8 --num_minibatches=32 \
   --total_timesteps=200_000_000 --eval_freq=10 --num-steps=500 \
   --control_mode="pd_joint_delta_pos" \
