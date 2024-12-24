@@ -97,8 +97,10 @@ class Args:
     # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
     demo_type: Optional[str] = None
     
-    data_aug: bool = False
+    data_aug: int = 0
     method: str = 'rgbd'
+    num_cams: int = 1
+    add_goal: int = 0
 
 
 class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memory
@@ -108,20 +110,46 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
         else:
             from diffusion_policy.utils import load_demo_dataset
             trajectories = load_demo_dataset(data_path, num_traj=num_traj, concat=False)
+            if args.add_goal:   
+                goals = load_demo_dataset(data_path, num_traj=num_traj, concat=False)
 
-        if args.data_aug:
+        if args.data_aug != 0:
             self.random_crop = RandomCrop((100, 100))  # Define the random crop size
             self.pad = Pad((14, 14))  # Pad to maintain the original size of 128x128
 
         for k, v in trajectories.items():
+            # print("len of v:", len(v))
             for i in range(len(v)):
                 if isinstance(v[i], dict):
                     if "sensor_data" in v[i]:
-                        img = torch.Tensor(v[i]["sensor_data"]["base_camera"]["rgb"]).to(device) # input rgb image
-                        depth_img = torch.Tensor(v[i]["sensor_data"]["base_camera"]["depth"]).to(device) # input depth image, (75, 128, 128, 1)
-                        img = img / 255.0  # Normalize RGB image to [0, 1]
-                        depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())  # Normalize depth image to [0, 1]
-                        trajectories[k][i] = torch.cat((img, depth_img), dim=-1)
+                        # for key, value in v[i]["sensor_data"].items():
+                        #     if isinstance(value, dict):
+                        #         for sub_key, sub_value in value.items():
+                        #             print(f"{key}, {sub_key}: {sub_value.shape}")
+                        #     else:
+                        #         print(f"{key}: {value.shape}")
+                        if args.add_goal:
+                            goals[k][i] = torch.Tensor(v[i]['extra']['goal_pos']).to(device) # (75, 3)
+                        if args.num_cams == 1:
+                            img = v[i]["sensor_data"]["base_camera"]["rgb"]
+                            img = torch.Tensor(img)
+                            img = img.to(device) # input rgb image
+                            depth_img = torch.Tensor(v[i]["sensor_data"]["base_camera"]["depth"]).to(device) # input depth image, (75, 128, 128, 1)
+                            img = img / 255.0  # Normalize RGB image to [0, 1]
+                            depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())  # Normalize depth image to [0, 1]
+                            trajectories[k][i] = torch.cat((img, depth_img), dim=-1)
+                        elif args.num_cams == 2:
+                            img1 = torch.Tensor(v[i]["sensor_data"]["base_camera"]["rgb"]).to(device)
+                            depth_img1 = torch.Tensor(v[i]["sensor_data"]["base_camera"]["depth"]).to(device)
+                            img2 = torch.Tensor(v[i]["sensor_data"]["hand_camera"]["rgb"]).to(device)
+                            depth_img2 = torch.Tensor(v[i]["sensor_data"]["hand_camera"]["depth"]).to(device)
+                            img1 = img1 / 255.0
+                            depth_img1 = (depth_img1 - depth_img1.min()) / (depth_img1.max() - depth_img1.min())
+                            img2 = img2 / 255.0
+                            depth_img2 = (depth_img2 - depth_img2.min()) / (depth_img2.max() - depth_img2.min())
+                            trajectories[k][i] = torch.cat((img1, depth_img1, img2, depth_img2), dim=-1)
+                        
+                        # print("traj", trajectories[k][i].shape)
                     else:
                         assert False, f"Unknown dict: {v[i].keys()}"
                 else:
@@ -147,6 +175,8 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
         print(f"Total transitions: {total_transitions}, Total obs sequences: {len(self.slices)}")
 
         self.trajectories = trajectories
+        self.goals = goals if args.add_goal else None
+        # print("shape of goals", self.goals['observations'][0].shape)
 
     def __getitem__(self, index):
         traj_idx, start, end = self.slices[index]
@@ -154,6 +184,7 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
 
         obs_seq = self.trajectories['observations'][traj_idx][max(0, start):start+self.obs_horizon]
         act_seq = self.trajectories['actions'][traj_idx][max(0, start):end]
+        goal = self.goals['observations'][traj_idx][max(0, start)] if (self.goals is not None) else None
         if start < 0: # pad before the trajectory
             obs_seq = torch.cat([obs_seq[0].repeat(-start, 1, 1, 1), obs_seq], dim=0)
             act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
@@ -162,7 +193,7 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
             pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
             act_seq = torch.cat([act_seq, pad_action.repeat(end-L, 1)], dim=0)
 
-        if args.data_aug:
+        if args.data_aug != 0:
             # Apply random crop and padding here
             obs_seq = obs_seq.permute(0, 3, 1, 2)  # (75, 128, 128, 3) -> (75, 3, 128, 128)
             obs_seq = self.random_crop(obs_seq)  # Apply random crop
@@ -170,10 +201,17 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
             obs_seq = obs_seq.permute(0, 2, 3, 1)  # (75, 3, 128, 128) -> (75, 128, 128, 3)
 
         assert obs_seq.shape[0] == self.obs_horizon and act_seq.shape[0] == self.pred_horizon
-        return {
-            'observations': obs_seq,
-            'actions': act_seq,
-        }
+        if args.add_goal == True: 
+            return {
+                'observations': obs_seq,
+                'actions': act_seq,
+                'goal': goal,
+            }
+        elif args.add_goal == False:
+            return {
+                'observations': obs_seq,
+                'actions': act_seq,
+            }
 
     def __len__(self):
         return len(self.slices)
@@ -206,10 +244,11 @@ class Agent(nn.Module):
             prediction_type='epsilon'
         )
 
-    def compute_loss(self, obs_seq, action_seq):
+    def compute_loss(self, obs_seq, action_seq, goal):
         B = obs_seq.shape[0]
         
-        # print("obs_seq:", obs_seq)
+        # print("obs_seq in loss:", obs_seq.shape)
+        # print("goal:", goal.shape)
 
         obs_cond = obs_seq.flatten(start_dim=1)
 
@@ -224,14 +263,19 @@ class Agent(nn.Module):
             action_seq, noise, timesteps)
 
         noise_pred = self.noise_pred_net(
-            noisy_action_seq, timesteps, global_cond=obs_cond)
+            noisy_action_seq, timesteps, global_cond=obs_cond, goal_cond=goal)
 
         return F.mse_loss(noise_pred, noise)
 
-    def get_action(self, obs_seq):
+    def get_action(self, obs_seq, goal):
         B = obs_seq.shape[0]
         with torch.no_grad():
+            # print("obs_seq:", obs_seq.shape)
             obs_cond = obs_seq.flatten(start_dim=1)
+            goal_cond = goal[:, 0, :] if goal is not None else None
+            # print("goal_cond:", goal.shape, goal_cond.shape)
+            assert (goal is None) or goal_cond.shape[1] == 3, f"goal_cond shape: {goal_cond.shape}"
+            assert (goal is None) or goal[:, 0, :] == goal[:, 1, :], f"goal of two time steps should be the same, but got {goal[0, 0, :]} and {goal[0, 1, :]} (an example)"
 
             noisy_action_seq = torch.randn((B, self.pred_horizon, self.act_dim), device=obs_seq.device)
 
@@ -240,6 +284,7 @@ class Agent(nn.Module):
                     sample=noisy_action_seq,
                     timestep=k,
                     global_cond=obs_cond,
+                    goal_cond=goal_cond,
                 )
 
                 noisy_action_seq = self.noise_scheduler.step(
@@ -273,6 +318,8 @@ if __name__ == "__main__":
         run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
+        
+    args.add_goal = True if args.add_goal == 1 else False # int to bool
 
     if args.demo_path.endswith('.h5'):
         import json
@@ -355,23 +402,29 @@ if __name__ == "__main__":
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
 
-    prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
+    # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
 
     for iteration, data_batch in enumerate(train_dataloader):
-
-        total_loss = agent.compute_loss(
-            obs_seq=data_batch['observations'],
-            action_seq=data_batch['actions'],
-        )
-
+        if args.add_goal == True:
+            total_loss = agent.compute_loss(
+                obs_seq=data_batch['observations'],
+                action_seq=data_batch['actions'],
+                goal=data_batch['goal'],
+            )
+        elif args.add_goal == False:
+            total_loss = agent.compute_loss(
+                obs_seq=data_batch['observations'],
+                action_seq=data_batch['actions'],
+                goal=None,
+            )
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
         lr_scheduler.step()
         # Print parameter differences
-        print_param_diff(agent, prev_params)
+        # print_param_diff(agent, prev_params)
         # Update previous parameters
-        prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
+        # prev_params = {name: param.clone() for name, param in agent.noise_pred_net.image_preprocess.named_parameters() if param.requires_grad}
         last_tick = time.time()
 
         ema.step(agent.parameters())

@@ -119,6 +119,12 @@ class FrameStack(gym.ObservationWrapper):
         return self.env.unwrapped
 
     def observation(self, observation):
+        # print("frame:", self.frames[0])
+        if isinstance(self.frames[0], dict):
+            ans_dict = {}
+            for k in self.frames[0].keys():
+                ans_dict[k] = torch.stack([frame[k] for frame in self.frames]).transpose(0, 1)
+            return ans_dict
         return torch.stack(list(self.frames)).transpose(0, 1)
 
     def step(self, action):

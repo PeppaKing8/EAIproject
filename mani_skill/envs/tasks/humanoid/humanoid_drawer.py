@@ -56,7 +56,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         PACKAGE_ASSET_DIR / "partnet_mobility/meta/info_cabinet_drawer_train.json"
     ) 
 
-    min_open_frac = 0.75
+    min_open_frac = 0.5
 
     def __init__(
         self,
@@ -359,6 +359,10 @@ class OpenCabinetDrawerEnv(BaseEnv):
         obs = dict(
             left_tcp_pose=self.agent.left_tcp.pose.raw_pose,
             right_tcp_pose=self.agent.right_tcp.pose.raw_pose,
+            # left_tcp_vel=self.agent.left_tcp.linear_velocity,
+            # right_tcp_vel=self.agent.right_tcp.linear_velocity,
+            # left_tcp_pose_p=self.agent.left_tcp.pose.p,
+            # right_tcp_pose_p=self.agent.right_tcp.pose.p,
         )
 
         if "state" in self.obs_mode:
@@ -368,8 +372,10 @@ class OpenCabinetDrawerEnv(BaseEnv):
                 target_handle_pos=info["handle_link_pos"],
                 apple_pos=info["apple_pos"],
                 tcp_to_apple_pos=info["apple_pos"] - self.agent.left_tcp.pose.p,
+                # tcp_to_apple_pos_dist=torch.linalg.norm(info["apple_pos"] - self.agent.left_tcp.pose.p, axis=1),
                 # apple_to_bowl_pos=self.apple.pose.p - self.bowl.pose.p,
                 apple_to_drawer_pos=self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)),
+                # apple_to_drawer_pos_dist=torch.linalg.norm(self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1),
             )
         return obs
 
@@ -396,7 +402,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         reaching_apple_award = torch.linalg.norm(
             self.agent.left_tcp.pose.p - self.apple.pose.p, axis=1
         )
-        reaching_apple_award = 1 - torch.tanh(reaching_apple_award)
+        reaching_apple_award = 1 / (reaching_apple_award + 0.1)
         
         # apple_to_bowl_dist = torch.linalg.norm(
         #     self.apple.pose.p - self.bowl.pose.p, axis=1
@@ -407,9 +413,10 @@ class OpenCabinetDrawerEnv(BaseEnv):
         apple_to_drawer_dist = torch.linalg.norm(
             self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1
         )
-        placing_reward = 1 - torch.tanh(apple_to_drawer_dist)
-        
-        reward += (reaching_apple_award * 30 + placing_reward * 60) * info["success_open"]
+        placing_reward = 1 / (apple_to_drawer_dist + 0.1) 
+        # reward_old = reward
+        reward += (reaching_apple_award * 5 + placing_reward * 10) * info["open_enough"]
+        # print(reward-reward_old)
         # reward += placing_reward * info["success_open"]
         # print(reaching_reward, open_reward, moving_away_reward, placing_reward, reward, info["success_open"])
         return reward

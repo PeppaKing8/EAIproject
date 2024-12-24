@@ -140,13 +140,16 @@ class ImagePreprocessRGB(nn.Module):
         return x
     
 class ImagePreprocessRGBD(nn.Module):
-    def __init__(self, output_channels=84):
+    def __init__(self, args, num_cams, output_channels=84):
         super().__init__()
+        self.args = args
         self.output_channels = output_channels
+        self.num_cams = num_cams
         ###################
         self.split_depth = False # choose the model type here
         ###################
         if self.split_depth:
+            assert num_cams == 1, f"num_cams: {num_cams}"
             self.resnet_rgb = resnet_custom_rgb()
             self.split: int = 8
             self.thres_l = 0.01
@@ -162,62 +165,96 @@ class ImagePreprocessRGBD(nn.Module):
             # self.resnet_depth = resnet_custom_rgbd(in_channels=1)
             self.fc = nn.Linear(output_channels * (self.split + 1), output_channels)
         else:
-            self.resnet_rgb = resnet_custom_rgb()
-            self.resnet_depth = resnet_custom_rgbd(in_channels=1)
-            self.fc = nn.Linear(output_channels * 2, output_channels)
+            assert num_cams <= 2, f"num_cams: {num_cams}"
+            if num_cams == 1:
+                self.resnet_rgb = resnet_custom_rgb()
+                self.resnet_depth = resnet_custom_rgbd(in_channels=1)
+                self.fc = nn.Linear(output_channels * 2, output_channels)
+                if args.add_goal == True:
+                    self.fc2 = nn.Linear(output_channels + 3, output_channels + 3)
+            elif num_cams == 2:
+                self.resnet_rgb_1 = resnet_custom_rgb()
+                self.resnet_rgb_2 = resnet_custom_rgb()
+                self.resnet_depth_1 = resnet_custom_rgbd(in_channels=1)
+                self.resnet_depth_2 = resnet_custom_rgbd(in_channels=1)
+                self.fc = nn.Linear(output_channels * 4, output_channels)
 
-    def forward(self, x):
-        assert x.shape[-1] == 2 * 128 * 128 * 4
-        x = x.view(x.shape[0] * 2, 128, 128, 4).permute(0, 3, 1, 2) # (B, 4, 128, 128)
-        if self.split_depth:
-            rgb = x[:, :3, ...]
-            depth = x[:, 3:, ...]
-            
-            out = self.resnet_rgb(rgb)
-            out = out.view(-1, self.output_channels)
-            
-            # depth_discrete = torch.zeros_like(depth)
-            for i in range(self.split):
-                mask = (depth > self.threses[i][0]) & (depth <= self.threses[i][1])
-                depth_map = depth * mask
-                depth_map = (depth_map - self.threses[i][0]) / (self.threses[i][1] - self.threses[i][0])
-                # depth_map = mask.to(torch.float32)
-                depth_map = depth_map.to('cuda:0')
-                depth_map.requires_grad = True
-                out_depth = self.resnet_depth[i](depth_map)
+    def forward(self, x, goal_cond=None):
+        if self.num_cams == 1:
+            assert x.shape[-1] == 2 * 128 * 128 * 4
+            x = x.view(x.shape[0] * 2, 128, 128, 4).permute(0, 3, 1, 2) # (B, 4, 128, 128)
+            if self.split_depth:
+                rgb = x[:, :3, ...]
+                depth = x[:, 3:, ...]
+                
+                out = self.resnet_rgb(rgb)
+                out = out.view(-1, self.output_channels)
+                
+                # depth_discrete = torch.zeros_like(depth)
+                for i in range(self.split):
+                    mask = (depth > self.threses[i][0]) & (depth <= self.threses[i][1])
+                    depth_map = depth * mask
+                    depth_map = (depth_map - self.threses[i][0]) / (self.threses[i][1] - self.threses[i][0])
+                    # depth_map = mask.to(torch.float32)
+                    depth_map = depth_map.to('cuda:0')
+                    depth_map.requires_grad = True
+                    out_depth = self.resnet_depth[i](depth_map)
+                    out_depth = out_depth.view(-1, self.output_channels)
+                    out = torch.cat([out, out_depth], dim=-1)
+                        
+                # depth.requires_grad = True
+                # depth_exp_img = depth[0][0]
+                # import matplotlib.pyplot as plt
+                # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+                # plt.colorbar()
+                # plt.show()
+                # if not os.path.exists('output_images'):
+                #     os.makedirs('output_images')
+                # plt.savefig('output_images/depth_image.png')
+                # rgb_exp_img = rgb[0].permute(1, 2, 0)
+                # # # rgb_exp_img[:,:,2] = rgb_exp_img[:,:,1] = 0.0
+                # plt.imshow(rgb_exp_img.cpu().numpy())
+                # plt.savefig('output_images/rgb_image.png')
+                # assert False
+                
+                # out_depth = self.resnet_depth(depth)
+                # out_depth = out_depth.view(-1, self.output_channels)
+                # out = torch.cat([out, out_depth], dim=-1)
+                
+                out = self.fc(out)
+                return out
+            else:
+                rgb = x[:, :3, ...]
+                depth = x[:, 3:, ...]
+                out_rgb = self.resnet_rgb(rgb)
+                out_depth = self.resnet_depth(depth)
+                # print("image/", out_rgb.shape, out_depth.shape, self.output_channels)
+                out_rgb = out_rgb.view(-1, self.output_channels)
                 out_depth = out_depth.view(-1, self.output_channels)
-                out = torch.cat([out, out_depth], dim=-1)
-                    
-            # depth.requires_grad = True
-            # depth_exp_img = depth[0][0]
-            # import matplotlib.pyplot as plt
-            # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
-            # plt.colorbar()
-            # plt.show()
-            # if not os.path.exists('output_images'):
-            #     os.makedirs('output_images')
-            # plt.savefig('output_images/depth_image.png')
-            # rgb_exp_img = rgb[0].permute(1, 2, 0)
-            # # # rgb_exp_img[:,:,2] = rgb_exp_img[:,:,1] = 0.0
-            # plt.imshow(rgb_exp_img.cpu().numpy())
-            # plt.savefig('output_images/rgb_image.png')
-            # assert False
-            
-            # out_depth = self.resnet_depth(depth)
-            # out_depth = out_depth.view(-1, self.output_channels)
-            # out = torch.cat([out, out_depth], dim=-1)
-            
-            out = self.fc(out)
-            return out
-        else:
-            rgb = x[:, :3, ...]
-            depth = x[:, 3:, ...]
-            out_rgb = self.resnet_rgb(rgb)
-            out_depth = self.resnet_depth(depth)
-            # print("image/", out_rgb.shape, out_depth.shape, self.output_channels)
-            out_rgb = out_rgb.view(-1, self.output_channels)
-            out_depth = out_depth.view(-1, self.output_channels)
-            out = torch.cat([out_rgb, out_depth], dim=-1)
+                out = torch.cat([out_rgb, out_depth], dim=-1)
+                out = self.fc(out)
+                if self.args.add_goal == True:
+                    # print("goal_cond shape:", out.shape, goal_cond.shape)
+                    out = torch.cat([out, goal_cond], dim=-1)
+                    out = self.fc2(out)
+                return out
+        elif self.num_cams == 2:
+            assert x.shape[-1] == 2 * 128 * 128 * 8
+            x = x.view(x.shape[0] * 2, 128, 128, 8).permute(0, 3, 1, 2)
+            assert self.split_depth == False, "split_depth must be False when num_cams == 2"
+            rgb_1 = x[:, :3, ...]
+            depth_1 = x[:, 3:4, ...]
+            rgb_2 = x[:, 4:7, ...]
+            depth_2 = x[:, 7:, ...]
+            out_rgb_1 = self.resnet_rgb_1(rgb_1)
+            out_depth_1 = self.resnet_depth_1(depth_1)
+            out_rgb_2 = self.resnet_rgb_2(rgb_2)
+            out_depth_2 = self.resnet_depth_2(depth_2)
+            out_rgb_1 = out_rgb_1.view(-1, self.output_channels)
+            out_depth_1 = out_depth_1.view(-1, self.output_channels)
+            out_rgb_2 = out_rgb_2.view(-1, self.output_channels)
+            out_depth_2 = out_depth_2.view(-1, self.output_channels)
+            out = torch.cat([out_rgb_1, out_depth_1, out_rgb_2, out_depth_2], dim=-1)
             out = self.fc(out)
             return out
 
@@ -243,6 +280,8 @@ class ConditionalUnet1D(nn.Module):
         """
 
         super().__init__()
+        self.args = args
+        
         all_dims = [input_dim] + list(down_dims)
         start_dim = down_dims[0]
 
@@ -255,6 +294,8 @@ class ConditionalUnet1D(nn.Module):
         )
         # cond_dim = dsed + global_cond_dim # 148 = 64 + 84
         cond_dim = 148
+        if args.add_goal == True:
+            cond_dim = cond_dim + 3
         self.cond_dim = cond_dim
         # print("cond:", cond_dim, "=", dsed, "+", global_cond_dim)
 
@@ -311,7 +352,7 @@ class ConditionalUnet1D(nn.Module):
             self.image_preprocess = ImagePreprocessRGB()
             self.method = 'rgb'
         elif args.method == 'rgbd':
-            self.image_preprocess = ImagePreprocessRGBD()
+            self.image_preprocess = ImagePreprocessRGBD(args, args.num_cams)
             self.method = 'rgbd'
         elif args.method == 'state':
             self.method = 'state'
@@ -324,7 +365,7 @@ class ConditionalUnet1D(nn.Module):
     def forward(self,
             sample: torch.Tensor,
             timestep: Union[torch.Tensor, float, int],
-            global_cond=None):
+            global_cond=None, goal_cond=None):
         """
         x: (B,T,input_dim)
         timestep: (B,) or int, diffusion step
@@ -352,10 +393,15 @@ class ConditionalUnet1D(nn.Module):
                 assert global_cond.shape[-1] == 98304, f"global_cond shape: {global_cond.shape}"
                 global_cond = self.image_preprocess(global_cond)
             elif self.method == 'rgbd':
-                assert global_cond.shape[-1] == 131072, f"global_cond shape: {global_cond.shape}"
                 if isinstance(global_cond, torch.cuda.ShortTensor):
                     global_cond = global_cond.to(torch.float32)
-                global_cond = self.image_preprocess(global_cond)
+                # print("global_cond shape:", global_cond.shape)
+                if global_cond.shape[-1] == 131072:
+                    global_cond = self.image_preprocess(global_cond, goal_cond)
+                elif global_cond.shape[-1] == 262144:
+                    global_cond = self.image_preprocess(global_cond, goal_cond)
+                else:
+                    raise ValueError(f"Invalid global_cond shape: {global_cond.shape}")
             
             assert global_cond.shape[0] == global_feature.shape[0], f"global_cond shape: {global_cond.shape}, global_feature shape: {global_feature.shape}"
             global_feature = torch.cat([
