@@ -56,7 +56,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         PACKAGE_ASSET_DIR / "partnet_mobility/meta/info_cabinet_drawer_train.json"
     ) 
 
-    min_open_frac = 0.5
+    min_open_frac = 0.3
 
     def __init__(
         self,
@@ -130,7 +130,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         )
         
     def _load_objects(self, options: dict):
-        scale = 0.75
+        scale = 1.5
         # builder = self.scene.create_actor_builder()
         fix_rotation_pose = sapien.Pose(q=euler2quat(np.pi / 2, 0, 0))
         # model_dir = os.path.dirname(__file__) + "/assets"
@@ -399,22 +399,23 @@ class OpenCabinetDrawerEnv(BaseEnv):
         reward[info["success_open"]] = 5.0
         # print(reward)
         # Reward for moving the apple away from the bowl
-        reaching_apple_award = torch.linalg.norm(
+        reaching_apple_dist = torch.linalg.norm(
             self.agent.left_tcp.pose.p - self.apple.pose.p, axis=1
         )
-        reaching_apple_award = 1 / (reaching_apple_award + 0.1)
+        reaching_apple_award = 1-torch.tanh(5 * reaching_apple_dist)
         
         # apple_to_bowl_dist = torch.linalg.norm(
         #     self.apple.pose.p - self.bowl.pose.p, axis=1
         # )
         # moving_away_reward = torch.tanh(5 * apple_to_bowl_dist)
-        
+        grab_enough = reaching_apple_dist < 0.1
+        reaching_apple_award[grab_enough] = 3
         # Reward for placing the apple into the drawer
         apple_to_drawer_dist = torch.linalg.norm(
             self.apple.pose.p - (self.handle_link_positions() + torch.tensor([0.2,0,0], device=self.apple.pose.p.device)), axis=1
         )
-        placing_reward = 1 / (apple_to_drawer_dist + 0.1) 
         # reward_old = reward
+        placing_reward = (1-torch.tanh(5 * apple_to_drawer_dist)) * grab_enough
         reward += (reaching_apple_award * 5 + placing_reward * 10) * info["open_enough"]
         # print(reward-reward_old)
         # reward += placing_reward * info["success_open"]

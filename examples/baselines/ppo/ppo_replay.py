@@ -271,6 +271,9 @@ if __name__ == "__main__":
 
     if args.checkpoint:
         agent.load_state_dict(torch.load(args.checkpoint))
+        
+    action_traj = np.load('/root/ManiSkill/examples/baselines/ppo/runs/HumanoidOpenDrawer-v1__ppo_eval__1__1735024818/eval_actions_61.npy')[:,4,:]
+    print(action_traj.shape)
 
     for iteration in range(1, args.num_iterations + 1):
         print(f"Epoch: {iteration}, global_step={global_step}")
@@ -283,14 +286,16 @@ if __name__ == "__main__":
             num_episodes = 0
             obs,actions = [eval_obs],[]
         
-            for _ in range(args.num_eval_steps):
+            for step in range(args.num_eval_steps):
                 with torch.no_grad():
                     action = agent.get_action(eval_obs, deterministic=True)
                     actions.append(action)
+                    action = torch.from_numpy(action_traj[step]).to(device)
+                    action = action.unsqueeze(0).repeat(args.num_eval_envs, 1)
                     eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(action)
                     obs.append(eval_obs)
                     # eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.get_action(eval_obs, deterministic=True))
-                    print(eval_obs.shape, action.shape)
+                    # print(eval_obs.shape, action.shape)
                     if "final_info" in eval_infos:
                         mask = eval_infos["_final_info"]
                         num_episodes += mask.sum()
@@ -298,8 +303,6 @@ if __name__ == "__main__":
                             eval_metrics[k].append(v)
             obs = torch.stack(obs).cpu().numpy()
             actions = torch.stack(actions).cpu().numpy()
-            np.save(f"runs/{run_name}/eval_obs_{iteration}.npy", obs)
-            np.save(f"runs/{run_name}/eval_actions_{iteration}.npy", actions)
             print(f"Evaluated {args.num_eval_steps * args.num_eval_envs} steps resulting in {num_episodes} episodes")
             for k, v in eval_metrics.items():
                 mean = torch.stack(v).float().mean()
