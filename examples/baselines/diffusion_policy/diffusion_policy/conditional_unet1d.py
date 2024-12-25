@@ -147,7 +147,11 @@ class ImagePreprocessRGBD(nn.Module):
         self.num_cams = num_cams
         ###################
         self.split_depth = False # choose the model type here
+        self.modify_depth = True
         ###################
+        if self.modify_depth:
+            self.alpha = 3.0
+            self.beta = 15.0
         if self.split_depth:
             assert num_cams == 1, f"num_cams: {num_cams}"
             self.resnet_rgb = resnet_custom_rgb()
@@ -226,6 +230,9 @@ class ImagePreprocessRGBD(nn.Module):
             else:
                 rgb = x[:, :3, ...]
                 depth = x[:, 3:, ...]
+                if self.modify_depth:
+                    # depth = 1.0 - (1.0 - depth) ** self.alpha
+                    depth = torch.log(1.0 + self.beta * depth) / torch.log(1.0 + self.beta)
                 out_rgb = self.resnet_rgb(rgb)
                 out_depth = self.resnet_depth(depth)
                 # print("image/", out_rgb.shape, out_depth.shape, self.output_channels)

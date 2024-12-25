@@ -420,6 +420,7 @@ class OpenCabinetDrawerEnv(BaseEnv):
         # print(reward-reward_old)
         # reward += placing_reward * info["success_open"]
         # print(reaching_reward, open_reward, moving_away_reward, placing_reward, reward, info["success_open"])
+        reward[info["success"]] = 30.0
         return reward
 
     def compute_normalized_dense_reward(

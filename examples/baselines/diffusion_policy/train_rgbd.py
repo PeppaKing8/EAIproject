@@ -101,6 +101,7 @@ class Args:
     method: str = 'rgbd'
     num_cams: int = 1
     add_goal: int = 0
+    cond_dim: int = 148
     
 def print_dict(d: dict): # may have multiple levels
     for k, v in d.items():

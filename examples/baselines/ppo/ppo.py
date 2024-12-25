@@ -76,7 +76,7 @@ class Args:
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.8
     """the discount factor gamma"""
-    gae_lambda: float = 0.9
+    gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 32
     """the number of mini-batches"""
@@ -88,7 +88,7 @@ class Args:
     """the surrogate clipping coefficient"""
     clip_vloss: bool = False
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.0
+    ent_coef: float = 0.1
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
