@@ -42,13 +42,21 @@ class RGBDWrapper(gym.ObservationWrapper):
         # print("make_env/", images.shape)
         # images = images.flatten(start_dim=1)
         # print("make_env/", images.shape)
-        goal = observation['extra']['goal_pos']
-        goal = torch.Tensor(goal)
-        # print("images:", images.shape, "goal:", goal.shape)
-        return {
-            "image": images,
-            "goal": goal,
-        }
+        
+        ###### GOAL CONDITIONED ######
+        # goal = observation['extra']['goal_pos']
+        # goal = torch.Tensor(goal)
+        # # print("images:", images.shape, "goal:", goal.shape)
+        # return {
+        #     "image": images,
+        #     "goal": goal,
+        # }
+        ###### GOAL CONDITIONED ######
+        
+        
+        ###### NO GOAL CONDITIONED ######
+        return images
+        ###### NO GOAL CONDITIONED ######
 
 def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, other_kwargs: dict, video_dir: Optional[str] = None, wrappers: list[gym.Wrapper] = []):
     """Create vectorized environment for evaluation and/or recording videos.

@@ -95,6 +95,9 @@ class Args:
     # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
     demo_type: Optional[str] = None
     method: str = 'state'
+    num_cams: int = 1
+    add_goal: int = 0
+    cond_dim: int = 148
 
 
 class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memory
@@ -273,6 +276,8 @@ if __name__ == "__main__":
         run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
+        
+    args.add_goal = True if args.add_goal == 1 else False # int to bool
 
     if args.demo_path.endswith('.h5'):
         import json

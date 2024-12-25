@@ -159,7 +159,7 @@ class ImagePreprocessRGBD(nn.Module):
             
             length = (self.thres_r - self.thres_l) / self.split
             for i in range(self.split):
-                self.resnet_depth.append(resnet_custom_rgbd(in_channels=1).to('cuda:0'))
+                self.resnet_depth.append(resnet_custom_rgbd(in_channels=1).to('cuda'))
                 self.threses.append((self.thres_l + length * i, self.thres_l + length * (i + 1)))
             
             # self.resnet_depth = resnet_custom_rgbd(in_channels=1)
@@ -196,7 +196,7 @@ class ImagePreprocessRGBD(nn.Module):
                     depth_map = depth * mask
                     depth_map = (depth_map - self.threses[i][0]) / (self.threses[i][1] - self.threses[i][0])
                     # depth_map = mask.to(torch.float32)
-                    depth_map = depth_map.to('cuda:0')
+                    depth_map = depth_map.to('cuda')
                     depth_map.requires_grad = True
                     out_depth = self.resnet_depth[i](depth_map)
                     out_depth = out_depth.view(-1, self.output_channels)
@@ -293,7 +293,7 @@ class ConditionalUnet1D(nn.Module):
             nn.Linear(dsed * 4, dsed),
         )
         # cond_dim = dsed + global_cond_dim # 148 = 64 + 84
-        cond_dim = 148
+        cond_dim = args.cond_dim
         if args.add_goal == True:
             cond_dim = cond_dim + 3
         self.cond_dim = cond_dim

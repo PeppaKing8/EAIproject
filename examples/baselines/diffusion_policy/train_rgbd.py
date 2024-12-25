@@ -101,6 +101,14 @@ class Args:
     method: str = 'rgbd'
     num_cams: int = 1
     add_goal: int = 0
+    
+def print_dict(d: dict): # may have multiple levels
+    for k, v in d.items():
+        if isinstance(v, dict):
+            print(f"{k}:")
+            print_dict(v)
+        else:
+            print(f"{k}: {v.shape}")
 
 
 class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memory
@@ -121,6 +129,7 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
             # print("len of v:", len(v))
             for i in range(len(v)):
                 if isinstance(v[i], dict):
+                    # print_dict(v[i])
                     if "sensor_data" in v[i]:
                         # for key, value in v[i]["sensor_data"].items():
                         #     if isinstance(value, dict):
@@ -216,6 +225,18 @@ class SmallDemoDataset_DiffusionPolicy(Dataset): # Load everything into GPU memo
     def __len__(self):
         return len(self.slices)
 
+class Normalizer(nn.Module):
+    def __init__(self, act_dim):
+        super().__init__()
+        self.act_dim = act_dim
+        self.mean = nn.Parameter(torch.zeros(act_dim))
+        self.std = nn.Parameter(torch.ones(act_dim))
+    
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+    
+    def denormalize(self, x):
+        return x * self.std + self.mean
 
 class Agent(nn.Module):
     def __init__(self, env, args):
@@ -243,6 +264,7 @@ class Agent(nn.Module):
             clip_sample=True,
             prediction_type='epsilon'
         )
+        self.normalizer = Normalizer(self.act_dim)
 
     def compute_loss(self, obs_seq, action_seq, goal):
         B = obs_seq.shape[0]
@@ -258,6 +280,8 @@ class Agent(nn.Module):
             0, self.noise_scheduler.config.num_train_timesteps,
             (B,), device=device
         ).long()
+        
+        action_seq = self.normalizer.normalize(action_seq)
 
         noisy_action_seq = self.noise_scheduler.add_noise(
             action_seq, noise, timesteps)
@@ -267,7 +291,7 @@ class Agent(nn.Module):
 
         return F.mse_loss(noise_pred, noise)
 
-    def get_action(self, obs_seq, goal):
+    def get_action(self, obs_seq, goal=None):
         B = obs_seq.shape[0]
         with torch.no_grad():
             # print("obs_seq:", obs_seq.shape)
@@ -275,7 +299,7 @@ class Agent(nn.Module):
             goal_cond = goal[:, 0, :] if goal is not None else None
             # print("goal_cond:", goal.shape, goal_cond.shape)
             assert (goal is None) or goal_cond.shape[1] == 3, f"goal_cond shape: {goal_cond.shape}"
-            assert (goal is None) or goal[:, 0, :] == goal[:, 1, :], f"goal of two time steps should be the same, but got {goal[0, 0, :]} and {goal[0, 1, :]} (an example)"
+            assert (goal is None) or (goal[0][0][i] == goal[0][1][i] for i in range(goal.shape[2])) #, f"goal of two time steps should be the same, but got {goal[0, 0, :]} and {goal[0, 1, :]} (an example)"
 
             noisy_action_seq = torch.randn((B, self.pred_horizon, self.act_dim), device=obs_seq.device)
 
@@ -295,6 +319,10 @@ class Agent(nn.Module):
 
         start = self.obs_horizon - 1
         end = start + self.act_horizon
+        
+        clip_action_seq = noisy_action_seq[:, start:end]
+        return self.normalizer.denormalize(clip_action_seq)
+        
         return noisy_action_seq[:, start:end]
 
 def print_param_diff(agent, prev_params):

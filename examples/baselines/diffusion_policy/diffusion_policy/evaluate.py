@@ -27,10 +27,17 @@ def evaluate(n: int, agent, eval_envs, device, sim_backend: str, args):
         obs, info = eval_envs.reset()
         eps_count = 0
         while eps_count < n:
-            obs_img = common.to_tensor(obs["image"], device)
-            obs_goal = common.to_tensor(obs["goal"], device)
-            # print("evaluate:", obs_img.shape, obs_goal[0])
-            action_seq = agent.get_action(obs_img, obs_goal)
+            ###### GOAL CONDITIONED ######
+            # obs_img = common.to_tensor(obs["image"], device)
+            # obs_goal = common.to_tensor(obs["goal"], device)
+            # # print("evaluate:", obs_img.shape, obs_goal[0])
+            # action_seq = agent.get_action(obs_img, obs_goal)
+            ###### GOAL CONDITIONED ######
+            
+            ###### NO GOAL CONDITIONED ######
+            obs = common.to_tensor(obs, device)
+            action_seq = agent.get_action(obs)
+            ###### NO GOAL CONDITIONED ######
             if sim_backend == "cpu":
                 action_seq = action_seq.cpu().numpy()
             for i in range(action_seq.shape[1]):

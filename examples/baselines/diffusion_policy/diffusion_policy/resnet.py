@@ -215,10 +215,14 @@ class CNN(nn.Module):
         self.conv4 = nn.Conv2d(32, 4, kernel_size=3, stride=1, padding=1)
         self.fc = nn.Linear(4 * 128 * 128, num_classes)
         self.relu = nn.LeakyReLU(0.1)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.bn2 = nn.BatchNorm2d(32)
-        self.bn3 = nn.BatchNorm2d(32)
-        self.bn4 = nn.BatchNorm2d(4)
+        # self.bn1 = nn.BatchNorm2d(32)
+        # self.bn2 = nn.BatchNorm2d(32)
+        # self.bn3 = nn.BatchNorm2d(32)
+        # self.bn4 = nn.BatchNorm2d(4)
+        self.bn1 = nn.Identity()
+        self.bn2 = nn.Identity()
+        self.bn3 = nn.Identity()
+        self.bn4 = nn.Identity()
     
     def forward(self, x):
         x = self.relu(self.bn1(self.conv1(x)))
