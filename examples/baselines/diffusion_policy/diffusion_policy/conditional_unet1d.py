@@ -150,7 +150,7 @@ class ImagePreprocessRGBD(nn.Module):
         self.modify_depth = True
         ###################
         if self.modify_depth:
-            self.alpha = 3.0
+            self.alpha = 4.0
             self.beta = 15.0
         if self.split_depth:
             assert num_cams == 1, f"num_cams: {num_cams}"
@@ -231,8 +231,22 @@ class ImagePreprocessRGBD(nn.Module):
                 rgb = x[:, :3, ...]
                 depth = x[:, 3:, ...]
                 if self.modify_depth:
-                    # depth = 1.0 - (1.0 - depth) ** self.alpha
-                    depth = torch.log(1.0 + self.beta * depth) / torch.log(1.0 + self.beta)
+                    depth = 1.0 - (1.0 - depth) ** self.alpha
+                    # depth = torch.log(1.0 + self.beta * depth) / torch.log(torch.tensor(1.0 + self.beta))
+                    # depth.requires_grad = True
+                    # depth_exp_img = depth[0][0].detach()
+                    # rgb_img = rgb[0].permute(1, 2, 0).detach()
+                    # import matplotlib.pyplot as plt
+                    # plt.imshow(depth_exp_img.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+                    # plt.colorbar()
+                    # plt.show()
+                    # if not os.path.exists('output_images'):
+                    #     os.makedirs('output_images')
+                    # plt.savefig('output_images/depth_image_lin.png')
+                    
+                    # plt.imshow(rgb_img.cpu().numpy())
+                    # plt.savefig('output_images/rgb_image.png')
+                    # assert False
                 out_rgb = self.resnet_rgb(rgb)
                 out_depth = self.resnet_depth(depth)
                 # print("image/", out_rgb.shape, out_depth.shape, self.output_channels)
